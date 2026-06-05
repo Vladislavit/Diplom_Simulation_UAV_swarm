@@ -150,16 +150,20 @@ class Drone:
         target = self.target_obj
         self._steer_toward(target.x, target.y, self.speed * 1.2, dt)
 
-        # Контакт — один удар
+        # Контакт — один камікадзе-удар з імовірнісним ураженням
         if math.hypot(target.x - self.x, target.y - self.y) <= cfg.DESTROY_DISTANCE:
-            target.hits_received += 1
+            target.hits_received += 1            # статистика: усього спроб
             if self.id in target.assigned_drones:
                 target.assigned_drones.remove(self.id)
             self.status = 'lost'
             self.lost_reason = 'kamikaze'
             self.target_obj = None
-            if target.hits_received >= target.drones_needed:
+            # Шанс ураження залежить від типу цілі
+            if random.random() < cfg.HIT_PROB[target.type]:
                 target.state = 'destroyed'
+            else:
+                # Промах — ціль уціліла, знову відкрита для аукціону
+                target.auction_done = False
 
     def _move_to_home(self, dt):
         """Повернення на базу."""

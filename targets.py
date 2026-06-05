@@ -15,6 +15,9 @@ class Target:
         self.type = target_type
         self.state = 'undetected'  # undetected / detected / classified / destroyed
         self.info = cfg.TARGET_TYPES[target_type]
+        # drones_needed більше НЕ визначає знищення (модель імовірнісна,
+        # див. cfg.HIT_PROB і drone._move_to_target). Лишено лише як
+        # довідкове поле; логіка ударів його ігнорує.
         self.drones_needed = self.info['max_drones']
         self.label = self.info['label']
         self.detect_timer = 0.0       # лічильник часу для класифікації
@@ -66,9 +69,14 @@ class Target:
         surface.blit(ring_surf, (x - outer, y - outer))
 
     def _draw_classified(self, surface, x, y, fonts):
-        """Іконка типу цілі з підписом — класифікована."""
+        """Іконка типу цілі з підписом — класифікована.
+
+        Підпис показує шанс ураження за один удар (імовірнісна модель),
+        а не фіксовану к-сть дронів.
+        """
         self._draw_icon(surface, x, y, 1.0)
-        text = f"{self.label} ({self.drones_needed})"
+        prob = int(cfg.HIT_PROB.get(self.type, 1.0) * 100)
+        text = f"{self.label} ({prob}%)"
         txt_surf = fonts['small'].render(text, True, (255, 200, 200))
         surface.blit(txt_surf, (x - txt_surf.get_width() // 2, y + 16))
 

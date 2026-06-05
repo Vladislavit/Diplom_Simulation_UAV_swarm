@@ -253,6 +253,16 @@ class Simulation:
             else:
                 drone.move(dt)
 
+        # 4b. Камікадзе-втрати стаються під час move (крок 4), а не update
+        # (крок 2), тож фіксуємо їх тут — лише метрика, без threat-логу й
+        # РЕБ-поширення (це успішний удар, а не загроза).
+        for drone in self.drones:
+            if (drone.status == 'lost' and not drone.loss_reported
+                    and drone.lost_reason == 'kamikaze'):
+                drone.loss_reported = True
+                self.metrics.record_drone_loss(
+                    self.sim_time, drone, 'kamikaze')
+
         # 5. Виявлення цілей
         self._detect_targets()
 
