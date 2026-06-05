@@ -185,6 +185,14 @@ def boids_move(drone, drones, dt):
     if drone.status == 'lost':
         return
 
+    # Wander — випадковий імпульс, що оновлюється кожні 2-3с. Розбиває
+    # симетрію, щоб рій блукав і не застигав купою при слабкій cohesion.
+    drone._wander_timer = getattr(drone, '_wander_timer', 0.0) - dt
+    if drone._wander_timer <= 0.0:
+        drone._wander_x = random.uniform(-1, 1) * cfg.BOIDS_WANDER
+        drone._wander_y = random.uniform(-1, 1) * cfg.BOIDS_WANDER
+        drone._wander_timer = random.uniform(2.0, 3.0)
+
     sep_x, sep_y = 0.0, 0.0
     ali_x, ali_y = 0.0, 0.0
     coh_x, coh_y = 0.0, 0.0
@@ -234,6 +242,11 @@ def boids_move(drone, drones, dt):
         cy = coh_y / nb_count
         ax += (cx - drone.x) * cfg.BOIDS_COH_WEIGHT * 0.5
         ay += (cy - drone.y) * cfg.BOIDS_COH_WEIGHT * 0.5
+
+    # Wander як кермова складова (масштаб швидкості, як у sep/ali/coh),
+    # сталий 2-3с → плавне меандрування, а не тремтіння.
+    ax += drone._wander_x * drone.speed
+    ay += drone._wander_y * drone.speed
 
     # Інтегруємо прискорення
     drone.vx += ax * dt

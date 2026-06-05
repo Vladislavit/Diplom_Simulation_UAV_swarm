@@ -104,10 +104,11 @@ CONSENSUS_INTERVAL = 2.0           # intra-cluster обмін (секунди)
 INTER_CLUSTER_INTERVAL = CONSENSUS_INTERVAL * 3  # inter-cluster обмін рідше
 
 # === Boids (swarm_only) ===
-BOIDS_SEP_RADIUS = 60       # радіус відштовхування (px)
-BOIDS_SEP_WEIGHT = 2.5      # вага separation (домінує над cohesion)
+BOIDS_SEP_RADIUS = 80       # радіус відштовхування (px)
+BOIDS_SEP_WEIGHT = 3.0      # вага separation (домінує над cohesion)
 BOIDS_ALI_WEIGHT = 0.8      # вага alignment
-BOIDS_COH_WEIGHT = 0.4      # вага cohesion (зменшено — не збиватись у точку)
+BOIDS_COH_WEIGHT = 0.1      # вага cohesion (мінімальна — не злипатись)
+BOIDS_WANDER = 0.8          # випадковий імпульс блукання (оновл. кожні 2-3с)
 
 # === Leader-Follower ===
 FOLLOWER_DIST = 120         # комфортна відстань від лідера (px)

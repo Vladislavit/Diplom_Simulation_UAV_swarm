@@ -92,7 +92,14 @@ class Simulation:
         for i in range(cfg.NUM_DRONES):
             x = cfg.DRONE_START_X + (i % cfg.DRONE_COLS) * cfg.DRONE_SPACING_X
             y = cfg.DRONE_START_Y + (i // cfg.DRONE_COLS) * cfg.DRONE_SPACING_Y
-            self.drones.append(Drone(i, x, y))
+            drone = Drone(i, x, y)
+            # Унікальний початковий вектор — розводить рій по різних
+            # напрямках на старті (критично для swarm_only Boids, щоб не
+            # злипались; в інших стратегіях одразу перекривається steering).
+            angle = (drone.id / cfg.NUM_DRONES) * 2 * math.pi
+            drone.vx = math.cos(angle) * cfg.DRONE_SPEED * 0.5
+            drone.vy = math.sin(angle) * cfg.DRONE_SPEED * 0.5
+            self.drones.append(drone)
 
         # === Статична кластеризація для hybrid ===
         # Призначаємо за порядковим id: перші CLUSTER_SIZE дронів → cluster 0,
