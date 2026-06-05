@@ -350,25 +350,6 @@ def _draw_arrowhead(surface, color, start, end, size=8):
     pygame.draw.line(surface, color, end, (int(rx), int(ry)), 2)
 
 
-def draw_mesh_connections(surface, drones):
-    """Зелені пунктирні відрізки — Mesh канали між дронами в радіусі зв'язку."""
-    drawn = set()
-    for d in drones:
-        if d.status == 'lost':
-            continue
-        for n in d.neighbors:
-            if n.status == 'lost':
-                continue
-            pair = (min(d.id, n.id), max(d.id, n.id))
-            if pair in drawn:
-                continue
-            drawn.add(pair)
-            _draw_dashed_line(surface, (60, 180, 60),
-                              (int(d.x), int(d.y)),
-                              (int(n.x), int(n.y)),
-                              width=1, dash=6, gap=4)
-
-
 _CLUSTER_PALETTE = [
     (80, 160, 255), (80, 255, 160), (255, 200, 80),
     (255, 80, 160), (200, 120, 255),
