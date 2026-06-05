@@ -13,7 +13,7 @@ from algorithms import (update_neighbors, swarm_scout,
                         intra_cluster_consensus, inter_cluster_consensus,
                         run_auction, run_leader_follower,
                         compute_clusters, run_cluster_auction,
-                        boids_move)
+                        stigmergy_update)
 from map_renderer import MapRenderer
 from ui_panel import UIPanel
 from metrics import MetricsCollector
@@ -217,6 +217,14 @@ class Simulation:
             if was_active and drone.status == 'lost' and not drone.loss_reported:
                 self._handle_drone_loss(drone)
 
+        # 2c. Стигмергія (swarm_only): феромонна координація — депозит у
+        # поточній зоні, випаровування, обмін із сусідами. Має відпрацювати
+        # ДО swarm_scout, щоб вибір зони враховував свіжі феромони.
+        if cfg.SCENARIO == 'swarm_only':
+            for drone in self.drones:
+                if drone.status == 'scouting':
+                    stigmergy_update(drone, self.drones, dt)
+
         # 3. Ройовий інтелект — вибір зон для розвідників.
         # Для hybrid передаємо сектор кластера → sector-бонус у swarm_scout.
         # Для leader_follower підлеглі летять у свій слот формації позаду
@@ -267,15 +275,12 @@ class Simulation:
                             sector_bounds=sector, follow_leader=leader,
                             follower_slot=slot)
 
-        # 4. Рух дронів. Для swarm_only — справжній Boids (sep/ali/coh)
-        # замість _move_to_zone; інші статуси (returning) йдуть звичайним
-        # drone.move(). У всіх інших стратегіях — стандартний рух.
+        # 4. Рух дронів — усі стратегії через drone.move(). swarm_only
+        # тепер теж летить до обраної swarm_scout зони (_move_to_zone),
+        # координуючись стигмергією (крок 2c), а не Boids. (boids_move
+        # лишено в algorithms.py на майбутнє, але тут не викликається.)
         for drone in self.drones:
-            if (cfg.SCENARIO == 'swarm_only'
-                    and drone.status == 'scouting'):
-                boids_move(drone, self.drones, dt)
-            else:
-                drone.move(dt)
+            drone.move(dt)
 
         # 4b. Камікадзе-втрати стаються під час move (крок 4), а не update
         # (крок 2), тож фіксуємо їх тут — лише метрика, без threat-логу й

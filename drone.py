@@ -33,6 +33,9 @@ class Drone:
         self.local_map = [[False] * cfg.GRID_COLS for _ in range(cfg.GRID_ROWS)]
         self.known_targets = {}   # target_id -> dict з інформацією
         self.risk_map = [[0.0] * cfg.GRID_COLS for _ in range(cfg.GRID_ROWS)]
+        # Стигмергія (swarm_only): цифрові феромони відвіданих зон
+        self.pheromone_map = [[0.0] * cfg.GRID_COLS
+                              for _ in range(cfg.GRID_ROWS)]
 
         # РЕБ
         self.ew_timer = 0.0

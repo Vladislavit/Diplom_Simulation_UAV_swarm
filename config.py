@@ -110,6 +110,11 @@ BOIDS_ALI_WEIGHT = 0.8      # вага alignment
 BOIDS_COH_WEIGHT = 0.1      # вага cohesion (мінімальна — не злипатись)
 BOIDS_WANDER = 0.8          # випадковий імпульс блукання (оновл. кожні 2-3с)
 
+# === Стигмергія (swarm_only) — координація через цифрові феромони ===
+PHEROMONE_DEPOSIT = 5.0     # феромон, що відкладається при відвідуванні зони
+PHEROMONE_DECAY = 0.995     # коефіцієнт випаровування щотіку
+PHEROMONE_WEIGHT = 80.0     # штраф у swarm_scout за феромон зони
+
 # === Leader-Follower ===
 FOLLOWER_DIST = 120         # комфортна відстань від лідера (px)
 

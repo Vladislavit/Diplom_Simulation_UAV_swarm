@@ -159,6 +159,11 @@ def swarm_scout(drone, drones, ew_rect, sector_bounds=None,
                 else:
                     score -= 50.0
 
+            # Стигмергія (тільки swarm_only): штраф за феромон — дрони
+            # уникають уже відвіданих зон, самоорганізовано покриваючи карту.
+            if cfg.SCENARIO == 'swarm_only':
+                score -= drone.pheromone_map[row][col] * cfg.PHEROMONE_WEIGHT
+
             if score > best_score:
                 best_score = score
                 best_zone = (col, row)
@@ -264,6 +269,48 @@ def boids_move(drone, drones, dt):
     # Кламп до меж карти
     drone.x = max(12, min(cfg.MAP_WIDTH - 12, drone.x))
     drone.y = max(12, min(cfg.WINDOW_HEIGHT - 12, drone.y))
+
+
+# ==================== СТИГМЕРГІЯ (swarm_only) ====================
+
+def stigmergy_update(drone, drones, dt):
+    """Координація через цифрові феромони (swarm_only).
+
+    Кожен дрон веде власну pheromone_map. Щотіку:
+    1. Депозит — у поточній зоні pheromone_map[row][col] += PHEROMONE_DEPOSIT
+       (дрон лишає слід уздовж свого шляху).
+    2. Випаровування — вся карта *= PHEROMONE_DECAY (старі сліди слабшають).
+    3. Обмін із сусідами в comm_radius — поклітинний max (локальне
+       поширення феромонів без повного консенсусу).
+
+    swarm_scout потім штрафує зони з високим феромоном → дрони уникають
+    уже відвіданих місць і самоорганізовано покривають карту.
+    """
+    if drone.status == 'lost':
+        return
+
+    # 1. Депозит у поточній зоні
+    zone = drone.get_zone()
+    if zone:
+        col, row = zone
+        drone.pheromone_map[row][col] += cfg.PHEROMONE_DEPOSIT
+
+    # 2. Випаровування всієї карти
+    for r in range(cfg.GRID_ROWS):
+        row_map = drone.pheromone_map[r]
+        for c in range(cfg.GRID_COLS):
+            row_map[c] *= cfg.PHEROMONE_DECAY
+
+    # 3. Обмін із сусідами в comm_radius — поклітинний max
+    for neighbor in drone.neighbors:
+        if neighbor.status == 'lost':
+            continue
+        for r in range(cfg.GRID_ROWS):
+            dm = drone.pheromone_map[r]
+            nm = neighbor.pheromone_map[r]
+            for c in range(cfg.GRID_COLS):
+                if nm[c] > dm[c]:
+                    dm[c] = nm[c]
 
 
 def _zone_overlaps_ew(col, row, ew_rect):
