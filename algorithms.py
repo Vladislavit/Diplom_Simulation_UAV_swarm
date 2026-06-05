@@ -24,8 +24,7 @@ def update_neighbors(drones):
 
 # ==================== РОЙОВИЙ ІНТЕЛЕКТ (РОЗВІДКА) ====================
 
-def swarm_scout(drone, drones, ew_rect, sector_bounds=None,
-                follow_leader=None, follower_slot=None):
+def swarm_scout(drone, drones, ew_rect, sector_bounds=None):
     """Вибір наступної зони: розвідка або патрулювання.
 
     Розвідка (є непокриті зони): бонус за непокриту зону, штраф за
@@ -40,39 +39,12 @@ def swarm_scout(drone, drones, ew_rect, sector_bounds=None,
     -50 за зону поза ним. Коли весь свій сектор покритий — sector-бонус
     вимикається й дрон скаутить вільно.
 
-    follow_leader=drone — глобальний лідер у стратегії leader_follower.
-    follower_slot=idx — порядковий номер цього follower серед живих
-    followers. Якщо лідер далі за FOLLOWER_DIST, follower летить у СВІЙ
-    слот формації позаду лідера (V/трикутник), а не в зону лідера —
-    інакше всі злипаються в лінію. Якщо лідер стоїть — тримає поточну
-    зону. Близько до лідера — звичайний swarm_scout.
+    Примітка: формація followers у leader_follower рахується напряму в
+    Simulation.update() (клин позаду лідера) — сюди потрапляє лише лідер
+    та followers без живого лідера (вільна розвідка).
     """
     if drone.status != 'scouting' or drone.target_zone is not None:
         return
-
-    # leader_follower: летимо у свій слот формації позаду лідера
-    if follow_leader is not None and follower_slot is not None:
-        dist = math.hypot(follow_leader.x - drone.x,
-                          follow_leader.y - drone.y)
-        if dist > cfg.FOLLOWER_DIST:
-            lspeed = math.hypot(follow_leader.vx, follow_leader.vy)
-            if lspeed < 0.01:
-                return  # лідер стоїть — тримати поточну зону
-            # Напрямок руху лідера і перпендикуляр до нього
-            dir_x = follow_leader.vx / lspeed
-            dir_y = follow_leader.vy / lspeed
-            perp_x, perp_y = -dir_y, dir_x
-            # Слот: 3 в ряд по ширині, ряди по 50px позаду
-            offset_x = (follower_slot % 3 - 1) * 40    # -40, 0, +40
-            offset_y = (follower_slot // 3 + 1) * 50   # 50, 100, ...
-            target_x = (follow_leader.x - dir_x * offset_y
-                        + perp_x * offset_x)
-            target_y = (follow_leader.y - dir_y * offset_y
-                        + perp_y * offset_x)
-            col = max(0, min(cfg.GRID_COLS - 1, int(target_x // cfg.ZONE_W)))
-            row = max(0, min(cfg.GRID_ROWS - 1, int(target_y // cfg.ZONE_H)))
-            drone.target_zone = (col, row)
-            return
 
     # Страхувальник проти залипань
     if getattr(drone, 'scout_idle_time', 0.0) > 3.0:

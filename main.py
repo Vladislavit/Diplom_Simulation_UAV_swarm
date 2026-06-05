@@ -246,34 +246,43 @@ class Simulation:
                         'threat')
                     drone.target_zone = None
 
-        follower_idx = {}
+        # 3b. Leader_follower: followers шикуються V-клином позаду лідера.
+        # Кожному — унікальна точка (ряд × бічне зміщення) відносно вектора
+        # руху лідера, тож вони не злипаються в лінію. Лідер живий —
+        # рахуємо формацію; загинув — followers падають у вільний
+        # swarm_scout нижче (рій розбредається = деградація ієрархії).
         if cfg.SCENARIO == 'leader_follower':
-            alive_followers = sorted(
+            leader = next(
                 (d for d in self.drones
-                 if d.status != 'lost' and not d.is_leader),
-                key=lambda d: d.id)
-            follower_idx = {d.id: i for i, d in enumerate(alive_followers)}
+                 if d.is_leader and d.status != 'lost'), None)
+            if leader is not None:
+                length = max(math.hypot(leader.vx, leader.vy), 0.001)
+                nx, ny = leader.vx / length, leader.vy / length  # напрямок
+                px, py = -ny, nx                                 # перпендикуляр
+                alive_followers = sorted(
+                    (d for d in self.drones
+                     if d.status != 'lost' and not d.is_leader),
+                    key=lambda d: d.id)
+                for idx, drone in enumerate(alive_followers):
+                    if drone.status != 'scouting' or drone.target_zone is not None:
+                        continue
+                    row_offset = idx // 3 + 1     # 1,1,1, 2,2,2, ...
+                    col_offset = idx % 3 - 1      # -1, 0, +1
+                    tx = (leader.x - nx * row_offset * cfg.FOLLOWER_DIST
+                          + px * col_offset * (cfg.FOLLOWER_DIST * 0.6))
+                    ty = (leader.y - ny * row_offset * cfg.FOLLOWER_DIST
+                          + py * col_offset * (cfg.FOLLOWER_DIST * 0.6))
+                    col = max(0, min(cfg.GRID_COLS - 1, int(tx // cfg.ZONE_W)))
+                    row = max(0, min(cfg.GRID_ROWS - 1, int(ty // cfg.ZONE_H)))
+                    drone.target_zone = (col, row)
 
         for drone in self.drones:
             if drone.status == 'scouting' and drone.target_zone is None:
                 sector = None
-                leader = None
-                slot = None
                 if cfg.SCENARIO == 'hybrid':
                     sector = self.cluster_sectors.get(drone.cluster_id)
-                elif (cfg.SCENARIO == 'leader_follower'
-                        and not drone.is_leader):
-                    # Єдиний глобальний лідер; кожен підлеглий — у свій
-                    # слот формації. Лідер загинув — None, рій розбредається.
-                    leader = next(
-                        (d for d in self.drones
-                         if d.is_leader and d.status != 'lost'),
-                        None
-                    )
-                    slot = follower_idx.get(drone.id)
                 swarm_scout(drone, self.drones, self.ew_rect,
-                            sector_bounds=sector, follow_leader=leader,
-                            follower_slot=slot)
+                            sector_bounds=sector)
 
         # 4. Рух дронів — усі стратегії через drone.move(). swarm_only
         # тепер теж летить до обраної swarm_scout зони (_move_to_zone),
