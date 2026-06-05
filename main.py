@@ -214,6 +214,23 @@ class Simulation:
         # Для hybrid передаємо сектор кластера → sector-бонус у swarm_scout.
         # Для leader_follower підлеглі летять у свій слот формації позаду
         # лідера — кожному свій порядковий номер серед живих followers.
+
+        # 3a. Reroute (тільки hybrid): якщо risk_map обраної target_zone
+        # зріс після вибору — скидаємо її, щоб swarm_scout перерахував і
+        # дрон не летів у щойно виявлену РЕБ-зону.
+        if cfg.SCENARIO == 'hybrid':
+            for drone in self.drones:
+                if drone.status != 'scouting' or drone.target_zone is None:
+                    continue
+                zx, zy = drone.target_zone
+                if drone.risk_map[zy][zx] >= 0.6:
+                    self._log(
+                        f"[REROUTE] D{drone.id} скинув target_zone "
+                        f"{drone.target_zone} (risk="
+                        f"{drone.risk_map[zy][zx]:.2f})",
+                        'threat')
+                    drone.target_zone = None
+
         follower_idx = {}
         if cfg.SCENARIO == 'leader_follower':
             alive_followers = sorted(
