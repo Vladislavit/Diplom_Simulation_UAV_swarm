@@ -248,9 +248,11 @@ class Simulation:
 
         # 3b. Leader_follower: followers шикуються V-клином позаду лідера.
         # Кожному — унікальна точка (ряд × бічне зміщення) відносно вектора
-        # руху лідера, тож вони не злипаються в лінію. Лідер живий —
-        # рахуємо формацію; загинув — followers падають у вільний
-        # swarm_scout нижче (рій розбредається = деградація ієрархії).
+        # руху лідера, тож вони не злипаються в лінію. Followers рухаються
+        # ВИКЛЮЧНО через цю формацію або наказ лідера (run_leader_follower);
+        # самостійно НЕ скаутять. Лідер загинув → формація не рахується,
+        # followers стоять (target_zone лишається None) — рій паралізовано,
+        # пряма демонстрація вразливости ієрархії.
         if cfg.SCENARIO == 'leader_follower':
             leader = next(
                 (d for d in self.drones
@@ -278,6 +280,11 @@ class Simulation:
 
         for drone in self.drones:
             if drone.status == 'scouting' and drone.target_zone is None:
+                # leader_follower: followers НЕ скаутять самі — рух лише
+                # через формацію (3b) чи наказ лідера. Лідер скаутить, щоб
+                # вести рій. Без лідера followers стоять.
+                if cfg.SCENARIO == 'leader_follower' and not drone.is_leader:
+                    continue
                 sector = None
                 if cfg.SCENARIO == 'hybrid':
                     sector = self.cluster_sectors.get(drone.cluster_id)
