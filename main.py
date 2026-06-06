@@ -1,7 +1,9 @@
 # main.py — Головний файл: запуск симуляції, основний цикл, оркестрація
 
-import pygame
+import os
 import sys
+import argparse
+import pygame
 import math
 import numpy as np
 import random
@@ -585,35 +587,37 @@ class Simulation:
     # ========== ЗАВЕРШЕННЯ МІСІЇ ==========
 
     def _check_mission_end(self):
-        """Три умови завершення місії."""
-        if self.mission_complete or self.mission_failed:
-            if not self._report_generated:
-                self._report_generated = True
-                self._save_and_report()
-            return
+        """Три умови завершення місії + автозвіт на тому ж тіку."""
+        if not (self.mission_complete or self.mission_failed):
+            # 1. Всі цілі знищено
+            if all(t.state == 'destroyed' for t in self.targets):
+                self.mission_complete = True
+                self._end_reason = 'success'
+                self._log("Всі цілі знищено! Місію виконано!", 'auction')
 
-        # 1. Всі цілі знищено
-        if all(t.state == 'destroyed' for t in self.targets):
-            self.mission_complete = True
-            self._end_reason = 'success'
-            self._log("Всі цілі знищено! Місію виконано!", 'auction')
+            # 2. Всі дрони втрачено
+            elif all(d.status == 'lost' for d in self.drones):
+                self.mission_failed = True
+                self._end_reason = 'all_lost'
+                self._log("Всі дрони втрачено! Місію провалено!", 'threat')
 
-        # 2. Всі дрони втрачено
-        elif all(d.status == 'lost' for d in self.drones):
-            self.mission_failed = True
-            self._end_reason = 'all_lost'
-            self._log("Всі дрони втрачено! Місію провалено!", 'threat')
+            # 3. Застій — немає прогресу понад STAGNATION_TIME
+            elif (not self.stagnation_triggered
+                  and self.sim_time - self.last_progress_time
+                  > cfg.STAGNATION_TIME):
+                self.stagnation_triggered = True
+                self.mission_complete = True
+                self._end_reason = 'stagnation'
+                self._log(
+                    f"Район зачищено (застій {cfg.STAGNATION_TIME:.0f}с). "
+                    "Місію завершено!", 'auction')
 
-        # 3. Застій — немає прогресу понад STAGNATION_TIME
-        elif (not self.stagnation_triggered
-              and self.sim_time - self.last_progress_time
-              > cfg.STAGNATION_TIME):
-            self.stagnation_triggered = True
-            self.mission_complete = True
-            self._end_reason = 'stagnation'
-            self._log(
-                f"Район зачищено (застій {cfg.STAGNATION_TIME:.0f}с). "
-                "Місію завершено!", 'auction')
+        # Звіт — одразу на тому ж тіку, щойно місія завершилась (важливо
+        # для headless, що виходить негайно й не дає наступного тіку).
+        if (self.mission_complete or self.mission_failed) \
+                and not self._report_generated:
+            self._report_generated = True
+            self._save_and_report()
 
     def _save_and_report(self):
         """Зберегти CSV, вивести фінальний рядок у лог і згенерувати звіт."""
@@ -821,8 +825,34 @@ class Simulation:
 
 # ==================== ТОЧКА ВХОДУ ====================
 
+def _parse_args():
+    """Аргументи CLI: --headless, --strategy, --seed."""
+    parser = argparse.ArgumentParser(description='Симуляція рою БПЛА')
+    parser.add_argument('--headless', action='store_true',
+                        help='без вікна/малювання, авто-вихід при завершенні')
+    parser.add_argument('--strategy', default=None,
+                        help='greedy|swarm_only|auction|hybrid|leader_follower')
+    parser.add_argument('--seed', type=int, default=None,
+                        help='фіксований MAP_SEED для відтворюваности')
+    return parser.parse_args()
+
+
 def main():
-    """Запуск симуляції."""
+    """Запуск симуляції (інтерактивно або headless для батч-метрик)."""
+    args = _parse_args()
+    headless = args.headless
+
+    # Headless: dummy-драйвери SDL + Agg для matplotlib (без GUI).
+    # Має бути ДО pygame.display та до імпорту matplotlib у звіті.
+    if headless:
+        os.environ['SDL_VIDEODRIVER'] = 'dummy'
+        os.environ['SDL_AUDIODRIVER'] = 'dummy'
+        os.environ['MPLBACKEND'] = 'Agg'
+
+    # Стратегію виставляємо ДО Simulation(), щоб reset() врахував її
+    if args.strategy:
+        cfg.SCENARIO = args.strategy
+
     pygame.init()
 
     screen = pygame.display.set_mode((cfg.WINDOW_WIDTH, cfg.WINDOW_HEIGHT))
@@ -831,23 +861,49 @@ def main():
     clock = pygame.time.Clock()
 
     sim = Simulation()
+    # Simulation.__init__ через _new_game() рандомить seed — за потреби
+    # перезапускаємо з фіксованим seed і правильною стратегією.
+    if args.strategy:
+        sim.current_strategy = args.strategy
+    if args.seed is not None:
+        cfg.MAP_SEED = args.seed
+        sim.reset()
 
     while True:
-        dt = clock.tick(cfg.FPS) / 1000.0
-        dt = min(dt, 0.05)   # захист від стрибків при затримках
+        if headless:
+            # Фіксований крок — детерміновано й без FPS-ліміту (макс. швидкість)
+            dt = 1.0 / 30.0
+        else:
+            dt = clock.tick(cfg.FPS) / 1000.0
+            dt = min(dt, 0.05)   # захист від стрибків при затримках
 
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
-            sim.handle_event(event)
+        if not headless:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                sim.handle_event(event)
 
         for _ in range(sim.speed_multiplier):
             sim.update(dt)
 
-        screen.fill(cfg.COLOR_BG)
-        sim.draw(screen)
-        pygame.display.flip()
+        # Headless: місія завершилась → звіт уже згенеровано в update()
+        # (_check_mission_end → _save_and_report), просто виходимо.
+        if headless:
+            if not (sim.mission_complete or sim.mission_failed) \
+                    and sim.sim_time > 600.0:
+                # Запобіжник від зависання — форсуємо звіт і вихід
+                sim._save_and_report()
+                pygame.quit()
+                sys.exit(0)
+            if sim.mission_complete or sim.mission_failed:
+                pygame.quit()
+                sys.exit(0)
+
+        if not headless:
+            screen.fill(cfg.COLOR_BG)
+            sim.draw(screen)
+            pygame.display.flip()
 
 
 if __name__ == '__main__':
