@@ -474,16 +474,16 @@ def run_auction(drones, target, risk_map_global, log_callback):
 
     Топ-N дронів з найвищим bid отримують статус attacking.
     """
-    if target.state != 'classified':
+    if target.state != 'classified' or target.auction_done:
         return None
 
-    # Імовірнісна модель: шлемо ОДИН дрон за раз. Поки призначений дрон у
-    # польоті — нового не шлемо; його промах звільнить ціль для наступного.
+    # Потрібно ще ударів: drones_needed - hits_received - вже_в_польоті
     already_attacking = sum(
         1 for d in drones
         if d.status == 'attacking' and d.target_obj is target
     )
-    needed = 1 - already_attacking
+    remaining_hits = target.drones_needed - target.hits_received
+    needed = remaining_hits - already_attacking
     if needed <= 0:
         return None
 
@@ -597,8 +597,9 @@ def run_auction(drones, target, risk_map_global, log_callback):
             'auction'
         )
 
-    # Знищення тепер імовірнісне (у drone._move_to_target), тож тут
-    # auction_done не чіпаємо — ціль закриється сама при state='destroyed'.
+    # auction_done закриваємо лише після фактичного знищення
+    if target.hits_received >= target.drones_needed:
+        target.auction_done = True
 
     # Повертаємо повні дані аукціону для метрик
     return {
@@ -675,13 +676,13 @@ def run_cluster_auction(drones, targets, risk_map, sectors,
         clusters.setdefault(d.cluster_id, []).append(d)
 
     def needs_hit(target):
-        if target.state != 'classified':
+        if target.state != 'classified' or target.auction_done:
             return False
         already = sum(
             1 for d in drones
             if d.status == 'attacking' and d.target_obj is target
         )
-        return already == 0   # один дрон за раз (імовірнісна модель)
+        return target.drones_needed - target.hits_received - already > 0
 
     # ---- Рівень 1: ціль у секторі кластера → внутрішньокластерний ----
     for cid, members in clusters.items():
@@ -757,13 +758,14 @@ def run_leader_follower(drones, targets, log_callback):
         # найближчу до цього лідера.
         pending = []
         for target in targets:
-            if target.state != 'classified':
+            if target.state != 'classified' or target.auction_done:
                 continue
             already = sum(
                 1 for d in drones
                 if d.status == 'attacking' and d.target_obj is target
             )
-            if already > 0:        # дрон уже летить — чекаємо результату
+            needed = target.drones_needed - target.hits_received - already
+            if needed <= 0:
                 continue
             dist = math.hypot(leader.x - target.x, leader.y - target.y)
             pending.append((dist, target))
@@ -803,5 +805,7 @@ def run_leader_follower(drones, targets, log_callback):
             f"[LEADER] {arrow} → {target.label}",
             'auction'
         )
-        # Знищення імовірнісне (drone._move_to_target) — auction_done тут
-        # не виставляємо; промах сам відкриє ціль для наступного дрона.
+
+        # auction_done закриваємо лише після фактичного знищення
+        if target.hits_received >= target.drones_needed:
+            target.auction_done = True
