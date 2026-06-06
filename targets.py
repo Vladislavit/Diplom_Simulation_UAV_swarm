@@ -15,7 +15,8 @@ class Target:
         self.type = target_type
         self.state = 'undetected'  # undetected / detected / classified / destroyed
         self.info = cfg.TARGET_TYPES[target_type]
-        self.drones_needed = self.info['max_drones']
+        # Фіксована к-сть ударів для знищення (за типом цілі)
+        self.drones_needed = cfg.DRONES_NEEDED[target_type]
         self.label = self.info['label']
         self.detect_timer = 0.0       # лічильник часу для класифікації
         self.assigned_drones = []     # id призначених дронів
@@ -66,7 +67,10 @@ class Target:
         surface.blit(ring_surf, (x - outer, y - outer))
 
     def _draw_classified(self, surface, x, y, fonts):
-        """Іконка типу цілі з підписом — класифікована."""
+        """Іконка типу цілі з підписом — класифікована.
+
+        Підпис показує фіксовану к-сть дронів для знищення.
+        """
         self._draw_icon(surface, x, y, 1.0)
         text = f"{self.label} ({self.drones_needed})"
         txt_surf = fonts['small'].render(text, True, (255, 200, 200))

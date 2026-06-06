@@ -77,6 +77,14 @@ TARGET_TYPES = {
     'bmp':      {'min_drones': 2, 'max_drones': 3, 'label': 'БМП'},
     'tank':     {'min_drones': 3, 'max_drones': 3, 'label': 'Танк'},
 }
+# Фіксована к-сть камікадзе-ударів для знищення цілі (за типом).
+# Ціль знищується коли hits_received >= DRONES_NEEDED[type].
+DRONES_NEEDED = {
+    'infantry': 1,
+    'vehicle':  2,
+    'bmp':      3,
+    'tank':     3,
+}
 CLASSIFY_TIME = 2.5    # секунд для класифікації після виявлення
 DESTROY_DISTANCE = 15  # відстань для знищення цілі (пікселі)
 
@@ -95,10 +103,16 @@ CONSENSUS_INTERVAL = 2.0           # intra-cluster обмін (секунди)
 INTER_CLUSTER_INTERVAL = CONSENSUS_INTERVAL * 3  # inter-cluster обмін рідше
 
 # === Boids (swarm_only) ===
-BOIDS_SEP_RADIUS = 60       # радіус відштовхування (px)
-BOIDS_SEP_WEIGHT = 2.5      # вага separation (домінує над cohesion)
+BOIDS_SEP_RADIUS = 80       # радіус відштовхування (px)
+BOIDS_SEP_WEIGHT = 3.0      # вага separation (домінує над cohesion)
 BOIDS_ALI_WEIGHT = 0.8      # вага alignment
-BOIDS_COH_WEIGHT = 0.4      # вага cohesion (зменшено — не збиватись у точку)
+BOIDS_COH_WEIGHT = 0.1      # вага cohesion (мінімальна — не злипатись)
+BOIDS_WANDER = 0.8          # випадковий імпульс блукання (оновл. кожні 2-3с)
+
+# === Стигмергія (swarm_only) — координація через цифрові феромони ===
+PHEROMONE_DEPOSIT = 5.0     # феромон, що відкладається при відвідуванні зони
+PHEROMONE_DECAY = 0.995     # коефіцієнт випаровування щотіку
+PHEROMONE_WEIGHT = 80.0     # штраф у swarm_scout за феромон зони
 
 # === Leader-Follower ===
 FOLLOWER_DIST = 120         # комфортна відстань від лідера (px)

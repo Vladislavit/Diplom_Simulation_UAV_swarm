@@ -33,6 +33,9 @@ class Drone:
         self.local_map = [[False] * cfg.GRID_COLS for _ in range(cfg.GRID_ROWS)]
         self.known_targets = {}   # target_id -> dict з інформацією
         self.risk_map = [[0.0] * cfg.GRID_COLS for _ in range(cfg.GRID_ROWS)]
+        # Стигмергія (swarm_only): цифрові феромони відвіданих зон
+        self.pheromone_map = [[0.0] * cfg.GRID_COLS
+                              for _ in range(cfg.GRID_ROWS)]
 
         # РЕБ
         self.ew_timer = 0.0
@@ -150,7 +153,7 @@ class Drone:
         target = self.target_obj
         self._steer_toward(target.x, target.y, self.speed * 1.2, dt)
 
-        # Контакт — один удар
+        # Контакт — один камікадзе-удар (+1 до hits_received, без шансу)
         if math.hypot(target.x - self.x, target.y - self.y) <= cfg.DESTROY_DISTANCE:
             target.hits_received += 1
             if self.id in target.assigned_drones:
@@ -158,6 +161,7 @@ class Drone:
             self.status = 'lost'
             self.lost_reason = 'kamikaze'
             self.target_obj = None
+            # Знищення при досягненні фіксованої к-сті ударів
             if target.hits_received >= target.drones_needed:
                 target.state = 'destroyed'
 

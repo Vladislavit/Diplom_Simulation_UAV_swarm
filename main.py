@@ -1,7 +1,9 @@
 # main.py — Головний файл: запуск симуляції, основний цикл, оркестрація
 
-import pygame
+import os
 import sys
+import argparse
+import pygame
 import math
 import numpy as np
 import random
@@ -13,7 +15,7 @@ from algorithms import (update_neighbors, swarm_scout,
                         intra_cluster_consensus, inter_cluster_consensus,
                         run_auction, run_leader_follower,
                         compute_clusters, run_cluster_auction,
-                        boids_move)
+                        stigmergy_update)
 from map_renderer import MapRenderer
 from ui_panel import UIPanel
 from metrics import MetricsCollector
@@ -92,7 +94,14 @@ class Simulation:
         for i in range(cfg.NUM_DRONES):
             x = cfg.DRONE_START_X + (i % cfg.DRONE_COLS) * cfg.DRONE_SPACING_X
             y = cfg.DRONE_START_Y + (i // cfg.DRONE_COLS) * cfg.DRONE_SPACING_Y
-            self.drones.append(Drone(i, x, y))
+            drone = Drone(i, x, y)
+            # Унікальний початковий вектор — розводить рій по різних
+            # напрямках на старті (критично для swarm_only Boids, щоб не
+            # злипались; в інших стратегіях одразу перекривається steering).
+            angle = (drone.id / cfg.NUM_DRONES) * 2 * math.pi
+            drone.vx = math.cos(angle) * cfg.DRONE_SPEED * 0.5
+            drone.vy = math.sin(angle) * cfg.DRONE_SPEED * 0.5
+            self.drones.append(drone)
 
         # === Статична кластеризація для hybrid ===
         # Призначаємо за порядковим id: перші CLUSTER_SIZE дронів → cluster 0,
@@ -210,48 +219,96 @@ class Simulation:
             if was_active and drone.status == 'lost' and not drone.loss_reported:
                 self._handle_drone_loss(drone)
 
+        # 2c. Стигмергія (swarm_only): феромонна координація — депозит у
+        # поточній зоні, випаровування, обмін із сусідами. Має відпрацювати
+        # ДО swarm_scout, щоб вибір зони враховував свіжі феромони.
+        if cfg.SCENARIO == 'swarm_only':
+            for drone in self.drones:
+                if drone.status == 'scouting':
+                    stigmergy_update(drone, self.drones, dt)
+
         # 3. Ройовий інтелект — вибір зон для розвідників.
         # Для hybrid передаємо сектор кластера → sector-бонус у swarm_scout.
         # Для leader_follower підлеглі летять у свій слот формації позаду
         # лідера — кожному свій порядковий номер серед живих followers.
-        follower_idx = {}
+
+        # 3a. Reroute (тільки hybrid): якщо risk_map обраної target_zone
+        # зріс після вибору — скидаємо її, щоб swarm_scout перерахував і
+        # дрон не летів у щойно виявлену РЕБ-зону.
+        if cfg.SCENARIO == 'hybrid':
+            for drone in self.drones:
+                if drone.status != 'scouting' or drone.target_zone is None:
+                    continue
+                zx, zy = drone.target_zone
+                if drone.risk_map[zy][zx] >= 0.6:
+                    self._log(
+                        f"[REROUTE] D{drone.id} скинув target_zone "
+                        f"{drone.target_zone} (risk="
+                        f"{drone.risk_map[zy][zx]:.2f})",
+                        'threat')
+                    drone.target_zone = None
+
+        # 3b. Leader_follower: followers шикуються V-клином позаду лідера.
+        # Кожному — унікальна точка (ряд × бічне зміщення) відносно вектора
+        # руху лідера, тож вони не злипаються в лінію. Followers рухаються
+        # ВИКЛЮЧНО через цю формацію або наказ лідера (run_leader_follower);
+        # самостійно НЕ скаутять. Лідер загинув → формація не рахується,
+        # followers стоять (target_zone лишається None) — рій паралізовано,
+        # пряма демонстрація вразливости ієрархії.
         if cfg.SCENARIO == 'leader_follower':
-            alive_followers = sorted(
+            leader = next(
                 (d for d in self.drones
-                 if d.status != 'lost' and not d.is_leader),
-                key=lambda d: d.id)
-            follower_idx = {d.id: i for i, d in enumerate(alive_followers)}
+                 if d.is_leader and d.status != 'lost'), None)
+            if leader is not None:
+                length = max(math.hypot(leader.vx, leader.vy), 0.001)
+                nx, ny = leader.vx / length, leader.vy / length  # напрямок
+                px, py = -ny, nx                                 # перпендикуляр
+                alive_followers = sorted(
+                    (d for d in self.drones
+                     if d.status != 'lost' and not d.is_leader),
+                    key=lambda d: d.id)
+                for idx, drone in enumerate(alive_followers):
+                    if drone.status != 'scouting' or drone.target_zone is not None:
+                        continue
+                    row_offset = idx // 3 + 1     # 1,1,1, 2,2,2, ...
+                    col_offset = idx % 3 - 1      # -1, 0, +1
+                    tx = (leader.x - nx * row_offset * cfg.FOLLOWER_DIST
+                          + px * col_offset * (cfg.FOLLOWER_DIST * 0.6))
+                    ty = (leader.y - ny * row_offset * cfg.FOLLOWER_DIST
+                          + py * col_offset * (cfg.FOLLOWER_DIST * 0.6))
+                    col = max(0, min(cfg.GRID_COLS - 1, int(tx // cfg.ZONE_W)))
+                    row = max(0, min(cfg.GRID_ROWS - 1, int(ty // cfg.ZONE_H)))
+                    drone.target_zone = (col, row)
 
         for drone in self.drones:
             if drone.status == 'scouting' and drone.target_zone is None:
+                # leader_follower: followers НЕ скаутять самі — рух лише
+                # через формацію (3b) чи наказ лідера. Лідер скаутить, щоб
+                # вести рій. Без лідера followers стоять.
+                if cfg.SCENARIO == 'leader_follower' and not drone.is_leader:
+                    continue
                 sector = None
-                leader = None
-                slot = None
                 if cfg.SCENARIO == 'hybrid':
                     sector = self.cluster_sectors.get(drone.cluster_id)
-                elif (cfg.SCENARIO == 'leader_follower'
-                        and not drone.is_leader):
-                    # Єдиний глобальний лідер; кожен підлеглий — у свій
-                    # слот формації. Лідер загинув — None, рій розбредається.
-                    leader = next(
-                        (d for d in self.drones
-                         if d.is_leader and d.status != 'lost'),
-                        None
-                    )
-                    slot = follower_idx.get(drone.id)
                 swarm_scout(drone, self.drones, self.ew_rect,
-                            sector_bounds=sector, follow_leader=leader,
-                            follower_slot=slot)
+                            sector_bounds=sector)
 
-        # 4. Рух дронів. Для swarm_only — справжній Boids (sep/ali/coh)
-        # замість _move_to_zone; інші статуси (returning) йдуть звичайним
-        # drone.move(). У всіх інших стратегіях — стандартний рух.
+        # 4. Рух дронів — усі стратегії через drone.move(). swarm_only
+        # тепер теж летить до обраної swarm_scout зони (_move_to_zone),
+        # координуючись стигмергією (крок 2c), а не Boids. (boids_move
+        # лишено в algorithms.py на майбутнє, але тут не викликається.)
         for drone in self.drones:
-            if (cfg.SCENARIO == 'swarm_only'
-                    and drone.status == 'scouting'):
-                boids_move(drone, self.drones, dt)
-            else:
-                drone.move(dt)
+            drone.move(dt)
+
+        # 4b. Камікадзе-втрати стаються під час move (крок 4), а не update
+        # (крок 2), тож фіксуємо їх тут — лише метрика, без threat-логу й
+        # РЕБ-поширення (це успішний удар, а не загроза).
+        for drone in self.drones:
+            if (drone.status == 'lost' and not drone.loss_reported
+                    and drone.lost_reason == 'kamikaze'):
+                drone.loss_reported = True
+                self.metrics.record_drone_loss(
+                    self.sim_time, drone, 'kamikaze')
 
         # 5. Виявлення цілей
         self._detect_targets()
@@ -530,35 +587,37 @@ class Simulation:
     # ========== ЗАВЕРШЕННЯ МІСІЇ ==========
 
     def _check_mission_end(self):
-        """Три умови завершення місії."""
-        if self.mission_complete or self.mission_failed:
-            if not self._report_generated:
-                self._report_generated = True
-                self._save_and_report()
-            return
+        """Три умови завершення місії + автозвіт на тому ж тіку."""
+        if not (self.mission_complete or self.mission_failed):
+            # 1. Всі цілі знищено
+            if all(t.state == 'destroyed' for t in self.targets):
+                self.mission_complete = True
+                self._end_reason = 'success'
+                self._log("Всі цілі знищено! Місію виконано!", 'auction')
 
-        # 1. Всі цілі знищено
-        if all(t.state == 'destroyed' for t in self.targets):
-            self.mission_complete = True
-            self._end_reason = 'success'
-            self._log("Всі цілі знищено! Місію виконано!", 'auction')
+            # 2. Всі дрони втрачено
+            elif all(d.status == 'lost' for d in self.drones):
+                self.mission_failed = True
+                self._end_reason = 'all_lost'
+                self._log("Всі дрони втрачено! Місію провалено!", 'threat')
 
-        # 2. Всі дрони втрачено
-        elif all(d.status == 'lost' for d in self.drones):
-            self.mission_failed = True
-            self._end_reason = 'all_lost'
-            self._log("Всі дрони втрачено! Місію провалено!", 'threat')
+            # 3. Застій — немає прогресу понад STAGNATION_TIME
+            elif (not self.stagnation_triggered
+                  and self.sim_time - self.last_progress_time
+                  > cfg.STAGNATION_TIME):
+                self.stagnation_triggered = True
+                self.mission_complete = True
+                self._end_reason = 'stagnation'
+                self._log(
+                    f"Район зачищено (застій {cfg.STAGNATION_TIME:.0f}с). "
+                    "Місію завершено!", 'auction')
 
-        # 3. Застій — немає прогресу понад STAGNATION_TIME
-        elif (not self.stagnation_triggered
-              and self.sim_time - self.last_progress_time
-              > cfg.STAGNATION_TIME):
-            self.stagnation_triggered = True
-            self.mission_complete = True
-            self._end_reason = 'stagnation'
-            self._log(
-                f"Район зачищено (застій {cfg.STAGNATION_TIME:.0f}с). "
-                "Місію завершено!", 'auction')
+        # Звіт — одразу на тому ж тіку, щойно місія завершилась (важливо
+        # для headless, що виходить негайно й не дає наступного тіку).
+        if (self.mission_complete or self.mission_failed) \
+                and not self._report_generated:
+            self._report_generated = True
+            self._save_and_report()
 
     def _save_and_report(self):
         """Зберегти CSV, вивести фінальний рядок у лог і згенерувати звіт."""
@@ -766,8 +825,34 @@ class Simulation:
 
 # ==================== ТОЧКА ВХОДУ ====================
 
+def _parse_args():
+    """Аргументи CLI: --headless, --strategy, --seed."""
+    parser = argparse.ArgumentParser(description='Симуляція рою БПЛА')
+    parser.add_argument('--headless', action='store_true',
+                        help='без вікна/малювання, авто-вихід при завершенні')
+    parser.add_argument('--strategy', default=None,
+                        help='greedy|swarm_only|auction|hybrid|leader_follower')
+    parser.add_argument('--seed', type=int, default=None,
+                        help='фіксований MAP_SEED для відтворюваности')
+    return parser.parse_args()
+
+
 def main():
-    """Запуск симуляції."""
+    """Запуск симуляції (інтерактивно або headless для батч-метрик)."""
+    args = _parse_args()
+    headless = args.headless
+
+    # Headless: dummy-драйвери SDL + Agg для matplotlib (без GUI).
+    # Має бути ДО pygame.display та до імпорту matplotlib у звіті.
+    if headless:
+        os.environ['SDL_VIDEODRIVER'] = 'dummy'
+        os.environ['SDL_AUDIODRIVER'] = 'dummy'
+        os.environ['MPLBACKEND'] = 'Agg'
+
+    # Стратегію виставляємо ДО Simulation(), щоб reset() врахував її
+    if args.strategy:
+        cfg.SCENARIO = args.strategy
+
     pygame.init()
 
     screen = pygame.display.set_mode((cfg.WINDOW_WIDTH, cfg.WINDOW_HEIGHT))
@@ -776,23 +861,49 @@ def main():
     clock = pygame.time.Clock()
 
     sim = Simulation()
+    # Simulation.__init__ через _new_game() рандомить seed — за потреби
+    # перезапускаємо з фіксованим seed і правильною стратегією.
+    if args.strategy:
+        sim.current_strategy = args.strategy
+    if args.seed is not None:
+        cfg.MAP_SEED = args.seed
+        sim.reset()
 
     while True:
-        dt = clock.tick(cfg.FPS) / 1000.0
-        dt = min(dt, 0.05)   # захист від стрибків при затримках
+        if headless:
+            # Фіксований крок — детерміновано й без FPS-ліміту (макс. швидкість)
+            dt = 1.0 / 30.0
+        else:
+            dt = clock.tick(cfg.FPS) / 1000.0
+            dt = min(dt, 0.05)   # захист від стрибків при затримках
 
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
-            sim.handle_event(event)
+        if not headless:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                sim.handle_event(event)
 
         for _ in range(sim.speed_multiplier):
             sim.update(dt)
 
-        screen.fill(cfg.COLOR_BG)
-        sim.draw(screen)
-        pygame.display.flip()
+        # Headless: місія завершилась → звіт уже згенеровано в update()
+        # (_check_mission_end → _save_and_report), просто виходимо.
+        if headless:
+            if not (sim.mission_complete or sim.mission_failed) \
+                    and sim.sim_time > 600.0:
+                # Запобіжник від зависання — форсуємо звіт і вихід
+                sim._save_and_report()
+                pygame.quit()
+                sys.exit(0)
+            if sim.mission_complete or sim.mission_failed:
+                pygame.quit()
+                sys.exit(0)
+
+        if not headless:
+            screen.fill(cfg.COLOR_BG)
+            sim.draw(screen)
+            pygame.display.flip()
 
 
 if __name__ == '__main__':
