@@ -614,10 +614,12 @@ class Simulation:
 
         # Звіт — одразу на тому ж тіку, щойно місія завершилась (важливо
         # для headless, що виходить негайно й не дає наступного тіку).
+        # auto_save=False (прапор --no-save) — лише грати без запису в results/.
         if (self.mission_complete or self.mission_failed) \
                 and not self._report_generated:
             self._report_generated = True
-            self._save_and_report()
+            if getattr(self, 'auto_save', True):
+                self._save_and_report()
 
     def _save_and_report(self):
         """Зберегти CSV, вивести фінальний рядок у лог і згенерувати звіт."""
@@ -834,6 +836,8 @@ def _parse_args():
                         help='greedy|swarm_only|auction|hybrid|leader_follower')
     parser.add_argument('--seed', type=int, default=None,
                         help='фіксований MAP_SEED для відтворюваности')
+    parser.add_argument('--no-save', action='store_true',
+                        help='не зберігати метрики в results/ (просто грати)')
     return parser.parse_args()
 
 
@@ -861,6 +865,7 @@ def main():
     clock = pygame.time.Clock()
 
     sim = Simulation()
+    sim.auto_save = not args.no_save   # --no-save → не писати в results/
     # Simulation.__init__ через _new_game() рандомить seed — за потреби
     # перезапускаємо з фіксованим seed і правильною стратегією.
     if args.strategy:
