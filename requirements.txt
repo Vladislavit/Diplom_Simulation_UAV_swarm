@@ -1,0 +1,15 @@
+# Залежності симуляції рою БПЛА
+# Встановлення:  pip install -r requirements.txt
+# Python 3.13 (тестовано на 3.13.7)
+
+# Рушій графіки/вікна та обробки подій (main, drone, targets, map_renderer, ui_panel)
+pygame==2.6.1
+
+# Процедурна генерація карти та детермінований RNG per-seed (main, map_renderer)
+numpy==2.3.2
+
+# Генерація PNG-звітів з метриками (metrics.generate_report)
+matplotlib==3.10.5
+
+# Юніт-тести (test_dss.py) — лише для розробки
+pytest==9.0.3
